@@ -1,0 +1,10 @@
+/tessdata/*
+    Cache-Control: public, max-age=31536000
+/icon-*.png
+    Cache-Control: public, max-age=31536000
+/sw.js
+    Content-Type: application/javascript
+/*
+    X-Content-Type-Options: nosniff
+    X-Frame-Options: DENY
+    Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://languagetool.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:
