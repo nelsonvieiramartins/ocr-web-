@@ -4,7 +4,8 @@
     Cache-Control: public, max-age=31536000
 /sw.js
     Content-Type: application/javascript
+    Cache-Control: no-cache
 /*
     X-Content-Type-Options: nosniff
     X-Frame-Options: DENY
-    Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://languagetool.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:
+    Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.gstatic.com https://accounts.google.com; connect-src 'self' https://languagetool.org https://firestore.googleapis.com https://*.googleapis.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self'
