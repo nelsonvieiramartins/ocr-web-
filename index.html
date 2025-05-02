@@ -1,827 +1,115 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!doctype html>
+<!doctype html>
 <html lang="pt-br">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OCR com Paste, Câmera, Webcam e Upload</title>
-    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
+    <title>OCR Leitor Reestruturado</title>
+    <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="/manifest.json">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6; color: #333; line-height: 1.6; }
-        .container { max-width: 800px; margin: 0 auto; background-color: #fff; padding: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-radius: 8px; }
-        h1, h2, h3 { color: #2c3e50; margin-bottom: 0.8em; }
-        h1 { text-align: center; margin-bottom: 1.2em; }
-        button { padding: 10px 15px; margin: 5px; cursor: pointer; border: none; border-radius: 4px; font-size: 0.95em; transition: background-color 0.3s ease, opacity 0.3s ease; }
-        button:disabled { background-color: #bdc3c7; cursor: not-allowed; opacity: 0.7; }
-        .controls-section { padding: 15px; background-color: #eaf0f1; border-radius: 6px; margin-bottom: 15px; text-align: center; }
-        .controls-section button { background-color: #3498db; color: white; }
-        .controls-section button:hover:not(:disabled) { background-color: #2980b9; }
-        input[type="file"] { display: none; }
-        #pasteArea { padding: 20px; margin-bottom: 25px; border: 2px dashed #bdc3c7; border-radius: 6px; text-align: center; background-color: #f8f9f9; color: #7f8c8d; font-weight: bold; cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease; }
-        #pasteArea:hover { background-color: #ecf0f1; border-color: #95a5a6; }
-        #webcamSection { margin-top: 20px; text-align: center; }
-        #webcamVideo { max-width: 100%; height: auto; border: 1px solid #ccc; display: none; margin-bottom: 10px; border-radius: 4px; }
-        #takePhotoButton { display: none; background-color: #e74c3c; color: white; }
-        #takePhotoButton:hover:not(:disabled) { background-color: #c0392b; }
-        #stopWebcamButton { display: none; background-color: #f39c12; color: white; }
-        #stopWebcamButton:hover:not(:disabled) { background-color: #e67e22; }
-        #statusArea { display: flex; align-items: center; justify-content: center; margin-top: 15px; min-height: 2em; }
-        #statusText { font-weight: bold; color: #34495e; margin-left: 10px; }
-        #progressBar { width: 100%; margin: 8px 0; height: 10px; border-radius: 5px; display: none; appearance: none; -webkit-appearance: none;}
-        progress::-webkit-progress-bar { background-color: #ecf0f1; border-radius: 5px;}
-        progress::-webkit-progress-value { background-color: #3498db; border-radius: 5px; transition: width 0.1s linear;}
-        progress::-moz-progress-bar { background-color: #3498db; border-radius: 5px; transition: width 0.1s linear;}
-        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: none; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .result-section { margin-top: 30px; border-top: 2px solid #ecf0f1; padding-top: 20px; }
-        pre#rawOutput { white-space: pre-wrap; word-wrap: break-word; background-color: #ecf0f1; padding: 15px; border: 1px solid #bdc3c7; border-radius: 4px; max-height: 350px; overflow-y: auto; color: #2c3e50; margin-bottom: 15px; font-size: 0.95em; line-height: 1.5; }
-        .spell-error { background-color: rgba(255, 0, 0, 0.15); text-decoration: underline wavy red 1px; cursor: help; padding: 0 1px; border-radius: 2px; }
-        #spellCheckButton { background-color: #9b59b6; color: white; display: block; margin: 15px auto 0; }
-        #spellCheckButton:hover:not(:disabled) { background-color: #8e44ad; }
-        #spellCheckOutput { margin-top: 15px; padding: 10px; background-color: #f8f9f9; border: 1px solid #dfe6e9; border-radius: 4px; min-height: 30px; }
-        #spellCheckOutput ul { list-style: none; padding: 0; margin: 0; }
-        #spellCheckOutput li { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #dfe6e9; font-size: 0.95em; }
-        #spellCheckOutput li:last-child { border-bottom: none; }
-        #spellCheckOutput .error-context { color: #7f8c8d; font-style: italic; }
-        #spellCheckOutput .error-word-in-context { font-weight: bold; color: #c0392b; }
-        #spellCheckOutput .suggestions { color: #27ae60; font-weight: bold; }
-        #extractedOutput { margin-top: 20px; }
-        #extractedOutput ul { list-style: none; padding: 15px; background-color: #f8f9f9; border: 1px solid #dfe6e9; border-radius: 4px; }
-        #extractedOutput li { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #dfe6e9; }
-        #extractedOutput li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-        .label { font-weight: bold; color: #34495e; min-width: 140px; display: inline-block; }
-        .extracted-value { color: #2d3436; }
-        .not-found { color: #95a5a6; font-style: italic; }
-        #saveButton { background-color: #27ae60; color: white; }
-        #saveButton:hover:not(:disabled) { background-color: #219653; }
-        #savedEntries { margin-top: 20px; padding: 15px; background-color: #f8f9f9; border: 1px solid #dfe6e9; border-radius: 4px; }
-        #savedEntries ul { list-style: none; padding: 0; margin: 0; }
-        #savedEntries li { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #dfe6e9; }
-        #savedEntries li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-        #downloadJsonButton { background-color: #3498db; color: white; margin-top: 10px; }
-        #downloadJsonButton:hover:not(:disabled) { background-color: #2980b9; }
-        #searchSection { margin-top: 30px; padding: 15px; background-color: #eaf0f1; border-radius: 6px; }
-        #searchInput { padding: 8px; width: 70%; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 0.95em; }
-        #searchButton { background-color: #2ecc71; color: white; }
-        #searchButton:hover:not(:disabled) { background-color: #27ae60; }
-        #searchResults { margin-top: 15px; padding: 10px; background-color: #f8f9f9; border: 1px solid #dfe6e9; border-radius: 4px; min-height: 30px; }
-        #searchResults ul { list-style: none; padding: 0; margin: 0; }
-        #searchResults li { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #dfe6e9; }
-        #searchResults li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-        #authSection { margin-bottom: 20px; padding: 15px; background-color: #eaf0f1; border-radius: 6px; text-align: center; }
-        #authSection input { padding: 8px; margin: 5px; width: 200px; border: 1px solid #bdc3c7; border-radius: 4px; }
-        #authSection button { background-color: #e67e22; color: white; }
-        #authSection button:hover:not(:disabled) { background-color: #d35400; }
-        #authStatus { margin-top: 10px; font-weight: bold; color: #34495e; }
-        #googleSignInButton { background-color: #4285f4; }
-        #googleSignInButton:hover:not(:disabled) { background-color: #3578e5; }
-        @media (max-width: 600px) {
-            .container { padding: 15px; }
-            button { font-size: 0.9em; padding: 8px 12px; }
-            #pasteArea { font-size: 0.9em; padding: 15px; }
-            #webcamVideo { max-width: 100%; }
-            #searchInput { width: 60%; }
-            #authSection input { width: 90%; }
-        }
-    </style>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
 </head>
 <body>
     <div class="container">
-        <h1>OCR: Paste, Câmera, Webcam ou Upload</h1>
-        <div id="authSection">
+        <h1>OCR Leitor Reestruturado</h1>
+
+        <section id="authSection" class="card">
+            <h2>Autenticação</h2>
             <div id="loginForm" style="display: none;">
-                <input type="email" id="emailInput" placeholder="E-mail">
-                <input type="password" id="passwordInput" placeholder="Senha">
+                <input type="email" id="emailInput" placeholder="E-mail" aria-label="E-mail">
+                <input type="password" id="passwordInput" placeholder="Senha" aria-label="Senha">
                 <button id="loginButton">Entrar</button>
                 <button id="googleSignInButton">Entrar com Google</button>
                 <button id="registerButton">Registrar</button>
             </div>
-            <div id="authStatus">Faça login para acessar a aplicação.</div>
-        </div>
-        <div class="controls-section" id="controlsSection" style="display: none;">
-            <p>1. Forneça a imagem:</p>
-            <label for="uploadInput"><button type="button" onclick="document.getElementById('uploadInput').click();">📁 Escolher Arquivo</button></label>
-            <input type="file" id="uploadInput" accept="image/png, image/jpeg">
-            <label for="mobileCameraInput"><button type="button" onclick="document.getElementById('mobileCameraInput').click();">📸 Câmera Celular</button></label>
-            <input type="file" id="mobileCameraInput" accept="image/*" capture="environment">
-            <button id="activateWebcamButton">💻 Ativar Webcam</button>
-            <button onclick="clearAll()" style="background-color: #e74c3c; color: white;">🗑️ Limpar Tudo</button>
-            <p id="webcamError" style="color: red; font-size: 0.9em; margin-top: 5px;"></p>
-        </div>
-        <div id="pasteArea" style="display: none;" title="Copie uma imagem e clique aqui ou pressione Ctrl+V / Cmd+V">
-            📋 Ou cole uma imagem da área de transferência aqui (Ctrl+V / Cmd+V)
-        </div>
-        <div id="webcamSection">
-            <video id="webcamVideo" playsinline autoplay muted></video>
-            <canvas id="webcamCanvas" style="display:none;"></canvas>
-            <button id="takePhotoButton">찰칵! Tirar Foto</button>
-            <button id="stopWebcamButton">🛑 Parar Webcam</button>
-        </div>
-        <div id="statusArea">
-            <div id="spinner" class="spinner"></div>
-            <span id="statusText">Faça login para começar.</span>
-        </div>
-        <progress id="progressBar" value="0" max="1"></progress>
-        <div class="result-section" id="resultSection" style="display: none;">
-            <h2>Resultados do OCR:</h2>
-            <h3>Texto Bruto Extraído (Erros ortográficos podem ser destacados abaixo):</h3>
-            <pre id="rawOutput">(Nenhum resultado ainda)</pre>
-            <button id="spellCheckButton" disabled>✔️ Verificar Ortografia</button>
-            <h3>Sugestões de Correção (LanguageTool):</h3>
-            <div id="spellCheckOutput">(Aguardando verificação...)</div>
-            <h3 style="margin-top: 25px;">Campos Extraídos (Experimental):</h3>
-            <div id="extractedOutput">
-                <ul>
-                    <li><span class="label">Nome Completo:</span> <span id="ext_nome" class="not-found">Não encontrado</span></li>
-                    <li><span class="label">CPF:</span> <span id="ext_cpf" class="not-found">Não encontrado</span></li>
-                    <li><span class="label">Data Nascimento:</span> <span id="ext_data_nascimento" class="not-found">Não encontrado</span></li>
-                    <li><span class="label">Telefone:</span> <span id="ext_telefone" class="not-found">Não encontrado</span></li>
-                </ul>
-                <p><em>A extração acima é experimental e provavelmente imprecisa para escrita manual.</em></p>
-            </div>
-            <button id="saveButton" disabled>💾 Salvar e Prosseguir</button>
-            <h3 style="margin-top: 25px;">Entradas Salvas:</h3>
-            <div id="savedEntries">
-                <ul id="savedEntriesList"></ul>
-                <button id="downloadJsonButton" disabled>📥 Baixar JSON</button>
-            </div>
-            <div id="searchSection">
-                <h3>Consultar Cadastros</h3>
-                <input type="text" id="searchInput" placeholder="Digite Nome ou CPF para buscar">
+            <div id="authStatus">Carregando status de autenticação...</div>
+        </section>
+
+        <main id="mainContent" style="display: none;">
+
+            <section id="controlsSection" class="card controls-section">
+                <h2>1. Forneça a Imagem</h2>
+                <div class="button-group">
+                    <label for="uploadInput">
+                        <button type="button" onclick="document.getElementById('uploadInput').click();">📁 Escolher Arquivo</button>
+                    </label>
+                    <input type="file" id="uploadInput" accept="image/png, image/jpeg" style="display: none;">
+
+                    <label for="mobileCameraInput">
+                        <button type="button" onclick="document.getElementById('mobileCameraInput').click();">📸 Câmera Celular</button>
+                    </label>
+                    <input type="file" id="mobileCameraInput" accept="image/*" capture="environment" style="display: none;">
+
+                    <button id="activateWebcamButton">💻 Ativar Webcam</button>
+                    <button id="clearAllButton" class="danger">🗑️ Limpar Tudo</button>
+                </div>
+                 <p id="webcamError" class="error-message"></p>
+                 <div id="pasteArea" class="paste-area" title="Copie uma imagem e clique aqui ou pressione Ctrl+V / Cmd+V">
+                    📋 Ou cole uma imagem da área de transferência aqui (Ctrl+V / Cmd+V)
+                 </div>
+            </section>
+
+            <section id="webcamSection" class="card webcam-section" style="display: none;">
+                <h2>Webcam</h2>
+                <video id="webcamVideo" playsinline autoplay muted></video>
+                <canvas id="webcamCanvas" style="display:none;"></canvas>
+                <div class="button-group">
+                    <button id="takePhotoButton" class="primary">찰칵! Tirar Foto</button>
+                    <button id="stopWebcamButton" class="warning">🛑 Parar Webcam</button>
+                </div>
+            </section>
+
+            <section id="statusSection" class="card status-section">
+                 <h2>Status</h2>
+                 <div id="statusArea">
+                    <div id="spinner" class="spinner" style="display: none;"></div>
+                    <span id="statusText">Aguardando ação...</span>
+                 </div>
+                 <progress id="progressBar" value="0" max="1" style="display: none;"></progress>
+            </section>
+
+            <section id="resultSection" class="card result-section">
+                <h2>2. Resultados do OCR</h2>
+                <div id="ocrOutput">
+                    <h3>Texto Bruto Extraído:</h3>
+                    <pre id="rawOutput">(Nenhum resultado ainda)</pre>
+                    <button id="spellCheckButton" disabled>✔️ Verificar Ortografia</button>
+                </div>
+                <div id="spellCheckResult">
+                    <h3>Sugestões de Correção (LanguageTool):</h3>
+                    <div id="spellCheckOutput">(Aguardando verificação...)</div>
+                </div>
+                 <div id="extractionResult">
+                    <h3>Campos Extraídos (Experimental):</h3>
+                    <ul id="extractedFieldsList">
+                        <li><span class="label">Nome Completo:</span> <span id="ext_nome" class="not-found">Não encontrado</span></li>
+                        <li><span class="label">CPF:</span> <span id="ext_cpf" class="not-found">Não encontrado</span></li>
+                        <li><span class="label">Data Nascimento:</span> <span id="ext_data_nascimento" class="not-found">Não encontrado</span></li>
+                        <li><span class="label">Telefone:</span> <span id="ext_telefone" class="not-found">Não encontrado</span></li>
+                    </ul>
+                    <p><em>A extração acima é experimental.</em></p>
+                </div>
+                <button id="saveButton" class="success" disabled>💾 Salvar Dados Processados</button>
+            </section>
+
+            <section id="savedDataSection" class="card saved-data-section">
+                <h2>3. Entradas Salvas no Firestore</h2>
+                <div id="savedEntries">
+                    <ul id="savedEntriesList"><li>Carregando entradas...</li></ul>
+                    <button id="downloadJsonButton" disabled>📥 Baixar JSON</button>
+                </div>
+            </section>
+
+             <section id="searchSection" class="card search-section">
+                <h2>4. Consultar Cadastros</h2>
+                <input type="text" id="searchInput" placeholder="Digite Nome ou CPF para buscar" aria-label="Buscar por Nome ou CPF">
                 <button id="searchButton">🔍 Buscar</button>
                 <div id="searchResults">(Nenhum resultado de busca)</div>
-            </div>
-        </div>
-    </div>
-    <script type="module">
-        // Importações do Firebase (SDK Modular v11.6.1)
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getAuth, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+            </section>
 
-        // Configuração do Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyCNmrulY8Q88n_mO4YZmJIU7FJgwqrow2o",
-            authDomain: "ocrleitor.firebaseapp.com",
-            projectId: "ocrleitor",
-            storageBucket: "ocrleitor.firebasestorage.app",
-            messagingSenderId: "1004691426866",
-            appId: "1:1004691426866:web:a0ce7ca5f83e590dcef62b"
-        };
+        </main> </div> <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
 
-        // Inicializar Firebase
-        let db, auth;
-        try {
-            const app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-            console.log('Firebase inicializado com sucesso! Project ID:', firebaseConfig.projectId);
-        } catch (error) {
-            console.error('Erro ao inicializar Firebase:', error.message, error);
-            document.getElementById('statusText').textContent = `Erro ao conectar com o banco de dados: ${error.message}. Verifique o Firebase Console.`;
-            document.getElementById('saveButton').disabled = true;
-            document.getElementById('searchButton').disabled = true;
-            document.getElementById('downloadJsonButton').disabled = true;
-        }
-
-        // Capturar erros globais
-        window.addEventListener('error', (event) => {
-            console.error('Erro de script detectado:', event.message, event.filename, event.lineno, event.colno, event.error);
-            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console.`;
-        });
-
-        // Elementos de autenticação
-        const loginForm = document.getElementById('loginForm');
-        const authStatus = document.getElementById('authStatus');
-        const emailInput = document.getElementById('emailInput');
-        const passwordInput = document.getElementById('passwordInput');
-        const loginButton = document.getElementById('loginButton');
-        const googleSignInButton = document.getElementById('googleSignInButton');
-        const registerButton = document.getElementById('registerButton');
-        const controlsSection = document.getElementById('controlsSection');
-        const pasteArea = document.getElementById('pasteArea');
-        const resultSection = document.getElementById('resultSection');
-
-        // Elementos principais
-        const uploadInput = document.getElementById('uploadInput');
-        const mobileCameraInput = document.getElementById('mobileCameraInput');
-        const activateWebcamButton = document.getElementById('activateWebcamButton');
-        const webcamVideo = document.getElementById('webcamVideo');
-        const webcamCanvas = document.getElementById('webcamCanvas');
-        const takePhotoButton = document.getElementById('takePhotoButton');
-        const stopWebcamButton = document.getElementById('stopWebcamButton');
-        const webcamErrorDiv = document.getElementById('webcamError');
-        const statusText = document.getElementById('statusText');
-        const spinner = document.getElementById('spinner');
-        const progressBar = document.getElementById('progressBar');
-        const rawOutputPre = document.getElementById('rawOutput');
-        const spellCheckButton = document.getElementById('spellCheckButton');
-        const saveButton = document.getElementById('saveButton');
-        const savedEntriesList = document.getElementById('savedEntriesList');
-        const downloadJsonButton = document.getElementById('downloadJsonButton');
-        const searchInput = document.getElementById('searchInput');
-        const searchButton = document.getElementById('searchButton');
-        const searchResults = document.getElementById('searchResults');
-        const extractedSpans = { 
-            nome: document.getElementById('ext_nome'), 
-            cpf: document.getElementById('ext_cpf'), 
-            data_nascimento: document.getElementById('ext_data_nascimento'), 
-            telefone: document.getElementById('ext_telefone')
-        };
-        let currentStream = null;
-        let rawOcrText = '';
-
-        // Gerenciar estado de autenticação
-        onAuthStateChanged(auth, user => {
-            if (user) {
-                loginForm.style.display = 'none';
-                authStatus.innerHTML = `Bem-vindo, ${user.displayName || user.email}! <button id="logoutButton">Sair</button>`;
-                controlsSection.style.display = 'block';
-                pasteArea.style.display = 'block';
-                resultSection.style.display = 'block';
-                setStatus('Pronto para processar.');
-                updateSavedEntries();
-                document.getElementById('logoutButton').addEventListener('click', () => {
-                    signOut(auth).then(() => {
-                        setStatus('Desconectado. Faça login novamente.');
-                    }).catch(error => {
-                        console.error('Erro ao fazer logout:', error);
-                        setStatus(`Erro ao fazer logout: ${error.message}`);
-                    });
-                });
-            } else {
-                loginForm.style.display = 'block';
-                authStatus.textContent = 'Faça login para acessar a aplicação.';
-                controlsSection.style.display = 'none';
-                pasteArea.style.display = 'none';
-                resultSection.style.display = 'none';
-                setStatus('Faça login para começar.');
-                savedEntriesList.innerHTML = '';
-                clearAll();
-            }
-        });
-
-        // Funções de autenticação
-        loginButton.addEventListener('click', async () => {
-            const email = emailInput.value.trim();
-            const password = passwordInput.value.trim();
-            if (!email || !password) {
-                setStatus('Preencha e-mail e senha.');
-                return;
-            }
-            showSpinner(true);
-            setStatus('Fazendo login...');
-            try {
-                await signInWithEmailAndPassword(auth, email, password);
-                setStatus('Login realizado com sucesso!');
-                showSpinner(false);
-            } catch (error) {
-                console.error('Erro ao fazer login:', error);
-                setStatus(`Erro ao fazer login: ${error.message}`);
-                showSpinner(false);
-            }
-        });
-
-        googleSignInButton.addEventListener('click', async () => {
-            const provider = new GoogleAuthProvider();
-            showSpinner(true);
-            setStatus('Fazendo login com Google...');
-            try {
-                await signInWithPopup(auth, provider);
-                setStatus('Login com Google realizado com sucesso!');
-                showSpinner(false);
-            } catch (error) {
-                console.error('Erro ao fazer login com Google:', error);
-                setStatus(`Erro ao fazer login com Google: ${error.message}`);
-                showSpinner(false);
-            }
-        });
-
-        registerButton.addEventListener('click', async () => {
-            const email = emailInput.value.trim();
-            const password = passwordInput.value.trim();
-            if (!email || !password) {
-                setStatus('Preencha e-mail e senha para registrar.');
-                return;
-            }
-            showSpinner(true);
-            setStatus('Registrando usuário...');
-            try {
-                await createUserWithEmailAndPassword(auth, email, password);
-                setStatus('Registro realizado com sucesso! Faça login.');
-                showSpinner(false);
-                emailInput.value = '';
-                passwordInput.value = '';
-            } catch (error) {
-                console.error('Erro ao registrar:', error);
-                setStatus(`Erro ao registrar: ${error.message}`);
-                showSpinner(false);
-            }
-        });
-
-        function showSpinner(show = true) { 
-            spinner.style.display = show ? 'inline-block' : 'none'; 
-        }
-        function setStatus(text, showProgress = false, progressValue = null) { 
-            statusText.textContent = text; 
-            progressBar.style.display = showProgress ? 'block' : 'none'; 
-            if (progressValue !== null) { 
-                progressBar.value = progressValue; 
-                progressBar.removeAttribute('max'); 
-            } else { 
-                progressBar.setAttribute('max', '1'); 
-            } 
-        }
-        function clearAll() { 
-            rawOcrText = ''; 
-            rawOutputPre.innerHTML = '(Nenhum resultado ainda)'; 
-            setStatus('Pronto para processar.'); 
-            showSpinner(false); 
-            document.getElementById('spellCheckOutput').innerHTML = '(Aguardando verificação...)'; 
-            spellCheckButton.disabled = true; 
-            saveButton.disabled = !db || !rawOcrText; 
-            for (const key in extractedSpans) { 
-                extractedSpans[key].textContent = 'Não encontrado'; 
-                extractedSpans[key].className = 'not-found'; 
-            } 
-            uploadInput.value = ''; 
-            mobileCameraInput.value = ''; 
-            webcamErrorDiv.textContent = ''; 
-            if (currentStream) { 
-                stopWebcamButton.click(); 
-            } 
-        }
-        function extrairCamposExperimentalJS(texto) { 
-            const dados = { nome: null, cpf: null, data_nascimento: null, telefone: null }; 
-            if (!texto) return dados; 
-            const textoLower = texto.toLowerCase(); 
-            try { 
-                const nomeMatch = textoLower.match(/(?:nome completo|nome):?\s*(.*)/); 
-                if (nomeMatch && nomeMatch[1]) { 
-                    const nomeBruto = nomeMatch[1].split('\n')[0].trim(); 
-                    dados.nome = nomeBruto.replace(/\b\w/g, l => l.toUpperCase()); 
-                } 
-            } catch (e) { 
-                console.error("Erro ao extrair nome:", e); 
-            } 
-            try { 
-                const cpfMatch = texto.match(/(\d{3}\.\d{3}\.\d{3}-\d{2})/); 
-                if (cpfMatch && cpfMatch[1]) dados.cpf = cpfMatch[1]; 
-            } catch (e) { 
-                console.error("Erro ao extrair CPF:", e); 
-            } 
-            try { 
-                const dataMatch = texto.match(/(\d{2}[/-]\d{2}[/-]\d{4})/); 
-                if (dataMatch && dataMatch[1]) dados.data_nascimento = dataMatch[1]; 
-            } catch (e) { 
-                console.error("Erro ao extrair Data Nasc:", e); 
-            } 
-            try { 
-                const telMatch = texto.match(/(\(?\d{2}\)?\s*\d{4,5}[- ]?\d{4})/); 
-                if (telMatch && telMatch[1]) dados.telefone = telMatch[1]; 
-            } catch (e) { 
-                console.error("Erro ao extrair Telefone:", e); 
-            } 
-            return dados; 
-        }
-        function highlightErrors(originalText, matches) { 
-            let highlightedText = originalText; 
-            for (let i = matches.length - 1; i >= 0; i--) { 
-                const match = matches[i]; 
-                const offset = match.offset; 
-                const length = match.length; 
-                const before = highlightedText.substring(0, offset); 
-                const erro = highlightedText.substring(offset, offset + length); 
-                const after = highlightedText.substring(offset + length); 
-                let suggestions = match.replacements.map(r => r.value).join(', '); 
-                let title = suggestions ? `Sugestões: ${suggestions}` : 'Erro ortográfico'; 
-                const highlightedError = `<span class="spell-error" title="${title}">${erro}</span>`; 
-                highlightedText = before + highlightedError + after; 
-            } 
-            return highlightedText; 
-        }
-        async function checkSpellingWithLanguageTool(textToCheck) { 
-            if (!textToCheck || textToCheck.trim() === '(Nenhum resultado ainda)' || textToCheck.trim() === '') { 
-                document.getElementById('spellCheckOutput').innerHTML = 'Nenhum texto para verificar.'; 
-                return; 
-            } 
-            if (!navigator.onLine) { 
-                document.getElementById('spellCheckOutput').innerHTML = '<span style="color: red;">Conexão com a internet necessária para verificação ortográfica.</span>'; 
-                return; 
-            } 
-            spellCheckButton.disabled = true; 
-            showSpinner(true); 
-            setStatus('Verificando ortografia...', true, null); 
-            document.getElementById('spellCheckOutput').innerHTML = '<i>Contactando API LanguageTool...</i>'; 
-            const apiUrl = 'https://languagetool.org/api/v2/check'; 
-            const data = new URLSearchParams(); 
-            data.append('text', textToCheck); 
-            data.append('language', 'pt-BR'); 
-            data.append('enabledOnly', 'false'); 
-            try { 
-                const response = await fetch(apiUrl, { 
-                    method: 'POST', 
-                    headers: { 
-                        'Content-Type': 'application/x-www-form-urlencoded', 
-                        'Accept': 'application/json' 
-                    }, 
-                    body: data 
-                }); 
-                if (!response.ok) throw new Error(`Erro na API LanguageTool: ${response.status} ${response.statusText}`); 
-                const result = await response.json(); 
-                console.log("LanguageTool Result:", result); 
-                if (result.matches && result.matches.length > 0) { 
-                    rawOutputPre.innerHTML = highlightErrors(rawOcrText, result.matches); 
-                    let suggestionsHtml = '<ul>'; 
-                    result.matches.forEach(match => { 
-                        const context = match.context.text.substring(0, match.context.offset) + '<span class="error-word-in-context">' + match.context.text.substring(match.context.offset, match.context.offset + match.context.length) + '</span>' + match.context.text.substring(match.context.offset + match.context.length); 
-                        suggestionsHtml += `<li><b>${match.message}</b><br><i>Contexto:</i> <span class="error-context">"${context}"</span><br>`; 
-                        if (match.replacements && match.replacements.length > 0) { 
-                            suggestionsHtml += `<i>Sugestões:</i> <span class="suggestions">${match.replacements.map(r => r.value).join(', ')}</span>`; 
-                        } 
-                        suggestionsHtml += `</li>`; 
-                    }); 
-                    suggestionsHtml += '</ul>'; 
-                    document.getElementById('spellCheckOutput').innerHTML = suggestionsHtml; 
-                    setStatus('Verificação concluída. Erros destacados no texto acima.'); 
-                } else { 
-                    document.getElementById('spellCheckOutput').innerHTML = '<span style="color: green;">Nenhum erro ortográfico encontrado pela API.</span>'; 
-                    setStatus('Verificação concluída.'); 
-                    rawOutputPre.textContent = rawOcrText; 
-                } 
-            } catch (error) { 
-                console.error('Erro ao verificar ortografia:', error); 
-                document.getElementById('spellCheckOutput').innerHTML = `<span style="color: red;">Erro ao contactar o serviço de verificação: ${error.message}</span>`; 
-                setStatus('Erro na verificação ortográfica.'); 
-                rawOutputPre.textContent = rawOcrText; 
-            } finally { 
-                spellCheckButton.disabled = false; 
-                showSpinner(false); 
-                progressBar.style.display = 'none'; 
-            } 
-        }
-        function resizeImage(blob, maxWidth, callback) {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const scale = maxWidth / img.width;
-                canvas.width = maxWidth;
-                canvas.height = img.height * scale;
-                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-                canvas.toBlob(callback, 'image/jpeg', 0.8);
-            };
-            img.src = URL.createObjectURL(blob);
-        }
-        function processImageWithTesseract(imageData) {
-            resizeImage(imageData, 800, (resizedBlob) => {
-                clearAll();
-                setStatus('Iniciando OCR...', false);
-                showSpinner(true);
-                activateWebcamButton.disabled = true;
-                spellCheckButton.disabled = true;
-                Tesseract.recognize(resizedBlob, 'por', {
-                    langPath: '/tessdata',
-                    logger: m => {
-                        console.log(m);
-                        let statusText = `Status: ${m.status}...`;
-                        if (m.progress && m.status === 'recognizing text') {
-                            setStatus(`Reconhecendo texto (${(m.progress * 100).toFixed(0)}%)`, true, m.progress);
-                        } else {
-                            setStatus(statusText, true, null);
-                        }
-                    }
-                }).then(({ data: { text } }) => {
-                    setStatus('OCR Concluído!');
-                    showSpinner(false);
-                    rawOcrText = text || '';
-                    rawOutputPre.textContent = rawOcrText || '(Nenhum texto encontrado)';
-                    spellCheckButton.disabled = !rawOcrText;
-                    saveButton.disabled = !db || !rawOcrText || !auth.currentUser;
-                    const extractedData = extrairCamposExperimentalJS(rawOcrText);
-                    for (const key in extractedData) {
-                        if (extractedData[key]) {
-                            extractedSpans[key].textContent = extractedData[key];
-                            extractedSpans[key].className = 'extracted-value';
-                        } else {
-                            extractedSpans[key].textContent = 'Não encontrado';
-                            extractedSpans[key].className = 'not-found';
-                        }
-                    }
-                }).catch(err => {
-                    setStatus('Erro durante o OCR.');
-                    showSpinner(false);
-                    rawOutputPre.textContent = `Erro: ${err.message || err}`;
-                    console.error('Erro no Tesseract.js:', err);
-                }).finally(() => {
-                    activateWebcamButton.disabled = false;
-                    progressBar.style.display = 'none';
-                });
-            });
-        }
-        async function saveEntry() {
-            if (!db || !auth.currentUser) {
-                setStatus('Faça login para salvar dados.');
-                return;
-            }
-            const entry = {
-                timestamp: new Date().toISOString(),
-                rawText: rawOcrText,
-                extracted: {
-                    nome: extractedSpans.nome.textContent !== 'Não encontrado' ? extractedSpans.nome.textContent : null,
-                    cpf: extractedSpans.cpf.textContent !== 'Não encontrado' ? extractedSpans.cpf.textContent : null,
-                    data_nascimento: extractedSpans.data_nascimento.textContent !== 'Não encontrado' ? extractedSpans.data_nascimento.textContent : null,
-                    telefone: extractedSpans.telefone.textContent !== 'Não encontrado' ? extractedSpans.telefone.textContent : null
-                },
-                userId: auth.currentUser.uid
-            };
-            try {
-                showSpinner(true);
-                setStatus('Salvando no banco de dados...');
-                await addDoc(collection(db, 'entries'), entry);
-                setStatus('Dados salvos no banco! Pronto para a próxima imagem.');
-                clearAll();
-            } catch (error) {
-                console.error('Erro ao salvar no Firestore:', error);
-                setStatus(`Erro ao salvar: ${error.message}`);
-            } finally {
-                showSpinner(false);
-            }
-        }
-        function updateSavedEntries() {
-            if (!db || !auth.currentUser) {
-                savedEntriesList.innerHTML = '<li>Faça login para ver entradas salvas.</li>';
-                return;
-            }
-            savedEntriesList.innerHTML = '';
-            const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid), orderBy('timestamp', 'desc'));
-            onSnapshot(q, (snapshot) => {
-                savedEntriesList.innerHTML = '';
-                const entries = [];
-                snapshot.forEach(doc => {
-                    entries.push({ id: doc.id, ...doc.data() });
-                });
-                entries.forEach((entry, index) => {
-                    const li = document.createElement('li');
-                    li.innerHTML = `
-                        <b>Entrada ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
-                        Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
-                        CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
-                        Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
-                        Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
-                        Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
-                    `;
-                    savedEntriesList.appendChild(li);
-                });
-                downloadJsonButton.disabled = entries.length === 0;
-            }, error => {
-                console.error('Erro ao buscar entradas:', error);
-                savedEntriesList.innerHTML = `<li>Erro ao carregar entradas: ${error.message}</li>`;
-            });
-        }
-        async function downloadJson() {
-            if (!db || !auth.currentUser) {
-                setStatus('Faça login para baixar dados.');
-                return;
-            }
-            try {
-                const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid));
-                const snapshot = await getDocs(q);
-                const entries = [];
-                snapshot.forEach(doc => {
-                    entries.push({ id: doc.id, ...doc.data() });
-                });
-                const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            } catch (error) {
-                console.error('Erro ao baixar JSON:', error);
-                setStatus(`Erro ao baixar JSON: ${error.message}`);
-            }
-        }
-        async function searchEntries() {
-            if (!db || !auth.currentUser) {
-                searchResults.innerHTML = 'Faça login para buscar cadastros.';
-                return;
-            }
-            const queryText = searchInput.value.trim().toLowerCase();
-            if (!queryText) {
-                searchResults.innerHTML = 'Digite um Nome ou CPF para buscar.';
-                return;
-            }
-            try {
-                showSpinner(true);
-                setStatus('Buscando cadastros...');
-                const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid));
-                const snapshot = await getDocs(q);
-                const results = [];
-                snapshot.forEach(doc => {
-                    const entry = doc.data();
-                    if ((entry.extracted.nome && entry.extracted.nome.toLowerCase().includes(queryText)) ||
-                        (entry.extracted.cpf && entry.extracted.cpf.includes(queryText))) {
-                        results.push({ id: doc.id, ...entry });
-                    }
-                });
-                searchResults.innerHTML = '';
-                if (results.length === 0) {
-                    searchResults.innerHTML = 'Nenhum cadastro encontrado.';
-                    return;
-                }
-                const ul = document.createElement('ul');
-                results.forEach((entry, index) => {
-                    const li = document.createElement('li');
-                    li.innerHTML = `
-                        <b>Resultado ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
-                        Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
-                        CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
-                        Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
-                        Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
-                        Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
-                    `;
-                    ul.appendChild(li);
-                });
-                searchResults.appendChild(ul);
-                setStatus('Busca concluída.');
-            } catch (error) {
-                console.error('Erro ao buscar cadastros:', error);
-                searchResults.innerHTML = `Erro ao realizar a busca: ${error.message}`;
-                setStatus('Erro na busca.');
-            } finally {
-                showSpinner(false);
-            }
-        }
-        uploadInput.addEventListener('change', (event) => { 
-            if (event.target.files[0]) processImageWithTesseract(event.target.files[0]); 
-        });
-        mobileCameraInput.addEventListener('change', (event) => { 
-            if (event.target.files[0]) processImageWithTesseract(event.target.files[0]); 
-        });
-        activateWebcamButton.addEventListener('click', async () => {
-            clearAll();
-            webcamErrorDiv.textContent = '';
-            setStatus('Acessando webcam...');
-            showSpinner(true);
-            if (currentStream) { 
-                currentStream.getTracks().forEach(track => track.stop()); 
-            }
-            const constraints = { video: { facingMode: 'user' } };
-            try {
-                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-                webcamVideo.srcObject = currentStream;
-                webcamVideo.style.display = 'block';
-                takePhotoButton.style.display = 'inline-block';
-                stopWebcamButton.style.display = 'inline-block';
-                activateWebcamButton.style.display = 'none';
-                setStatus('Webcam ativa. Posicione e tire a foto.');
-                showSpinner(false);
-            } catch (err) {
-                console.error("Erro ao acessar webcam:", err);
-                setStatus('Erro ao acessar webcam.');
-                showSpinner(false);
-                webcamErrorDiv.textContent = `Erro: ${err.name} - ${err.message}. Verifique permissões e HTTPS.`;
-                currentStream = null;
-            }
-        });
-        stopWebcamButton.addEventListener('click', () => {
-            if (currentStream) { 
-                currentStream.getTracks().forEach(track => track.stop()); 
-            }
-            webcamVideo.style.display = 'none';
-            takePhotoButton.style.display = 'none';
-            stopWebcamButton.style.display = 'none';
-            activateWebcamButton.style.display = 'inline-block';
-            setStatus('Webcam parada.');
-            currentStream = null;
-        });
-        takePhotoButton.addEventListener('click', () => {
-            if (!currentStream) { 
-                setStatus('Erro: Webcam não está ativa.'); 
-                return; 
-            }
-            setStatus('Capturando imagem...');
-            showSpinner(true);
-            const context = webcamCanvas.getContext('2d');
-            webcamCanvas.width = webcamVideo.videoWidth;
-            webcamCanvas.height = webcamVideo.videoHeight;
-            context.drawImage(webcamVideo, 0, 0, webcamCanvas.width, webcamCanvas.height);
-            webcamCanvas.toBlob(function(blob) {
-                if (blob) {
-                    processImageWithTesseract(blob);
-                    stopWebcamButton.click();
-                } else {
-                    setStatus('Erro ao criar imagem.');
-                    showSpinner(false);
-                }
-            }, 'image/jpeg');
-        });
-        spellCheckButton.addEventListener('click', () => { 
-            checkSpellingWithLanguageTool(rawOcrText); 
-        });
-        saveButton.addEventListener('click', saveEntry);
-        downloadJsonButton.addEventListener('click', downloadJson);
-        searchButton.addEventListener('click', searchEntries);
-        searchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') searchEntries();
-        });
-        document.addEventListener('paste', (event) => {
-            console.log('Paste event detected!');
-            const items = (event.clipboardData || event.originalEvent.clipboardData)?.items;
-            if (!items) {
-                console.log('Nenhum item encontrado na área de transferência.');
-                return;
-            }
-            let foundImage = false;
-            for (let i = 0; i < items.length; i++) {
-                if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
-                    const imageFile = items[i].getAsFile();
-                    console.log('Imagem encontrada ao colar:', imageFile);
-                    if (imageFile) {
-                        event.preventDefault();
-                        setStatus('Imagem colada detectada. Processando...');
-                        showSpinner(true);
-                        processImageWithTesseract(imageFile);
-                        foundImage = true;
-                        break;
-                    }
-                }
-            }
-            if (!foundImage) {
-                console.log('Nenhum dado de imagem encontrado ao colar.');
-            }
-        });
-        // Registrar Service Worker ao carregar a página
-        window.addEventListener('load', () => {
-            clearAll();
-            if ('serviceWorker' in navigator) {
-                // Verificar se o ambiente é seguro (HTTPS ou localhost/127.0.0.1)
-                const hostname = location.hostname || 'unknown';
-                const protocol = location.protocol || 'unknown';
-                const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-                const isHttps = protocol === 'https:';
-                if (!isHttps && !isLocalhost) {
-                    console.error(`Service Worker requer HTTPS ou localhost/127.0.0.1. Atual: protocol=${protocol}, hostname=${hostname}`);
-                    setStatus('Erro: Service Worker requer HTTPS ou localhost. Use https://localhost:8080 ou deploy em HTTPS.');
-                    return;
-                }
-                // Registrar o Service Worker
-                navigator.serviceWorker.register('/sw.js', { scope: '/' })
-                    .then(reg => {
-                        console.log('Service Worker registrado com sucesso:', reg.scope);
-                        setStatus('Service Worker ativo. Faça login para começar.');
-                    })
-                    .catch(err => {
-                        console.error('Erro ao registrar Service Worker:', err.message, err);
-                        setStatus(`Erro ao registrar Service Worker: ${err.message}. Verifique se /sw.js está na raiz e acessível.`);
-                    });
-            } else {
-                console.warn('Service Worker não suportado neste navegador.');
-                setStatus('Service Worker não suportado no navegador.');
-            }
-        });
-    </script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
