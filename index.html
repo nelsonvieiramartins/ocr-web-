@@ -793,17 +793,21 @@
                 console.log('Nenhum dado de imagem encontrado ao colar.');
             }
         });
+        // Registrar Service Worker ao carregar a página
         window.addEventListener('load', () => {
             clearAll();
-            // Registrar Service Worker
             if ('serviceWorker' in navigator) {
-                const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-                const isHttps = location.protocol === 'https:';
+                // Verificar se o ambiente é seguro (HTTPS ou localhost/127.0.0.1)
+                const hostname = location.hostname || 'unknown';
+                const protocol = location.protocol || 'unknown';
+                const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+                const isHttps = protocol === 'https:';
                 if (!isHttps && !isLocalhost) {
-                    console.error('Service Worker requer HTTPS ou localhost/127.0.0.1. Atual: ', location.protocol, location.hostname);
+                    console.error(`Service Worker requer HTTPS ou localhost/127.0.0.1. Atual: protocol=${protocol}, hostname=${hostname}`);
                     setStatus('Erro: Service Worker requer HTTPS ou localhost. Use https://localhost:8080 ou deploy em HTTPS.');
                     return;
                 }
+                // Registrar o Service Worker
                 navigator.serviceWorker.register('/sw.js', { scope: '/' })
                     .then(reg => {
                         console.log('Service Worker registrado com sucesso:', reg.scope);

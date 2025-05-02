@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ocr-app-cache-v2';
+const CACHE_NAME = 'ocrleitor-cache-v1';
 const urlsToCache = [
     '/',
     '/index.html',
@@ -10,37 +10,21 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-    console.log('[Service Worker] Instalando Service Worker...');
+    console.log('[Service Worker] Instalando...');
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
                 console.log('[Service Worker] Cache aberto:', CACHE_NAME);
-                return cache.addAll(urlsToCache)
-                    .then(() => console.log('[Service Worker] Recursos armazenados em cache.'))
-                    .catch(error => console.error('[Service Worker] Erro ao armazenar recursos:', error));
+                return cache.addAll(urlsToCache);
             })
-            .catch(error => console.error('[Service Worker] Erro ao abrir cache:', error))
-    );
-});
-
-self.addEventListener('activate', event => {
-    console.log('[Service Worker] Ativando Service Worker...');
-    event.waitUntil(
-        caches.keys().then(cacheNames => {
-            return Promise.all(
-                cacheNames.map(cacheName => {
-                    if (cacheName !== CACHE_NAME) {
-                        console.log('[Service Worker] Removendo cache antigo:', cacheName);
-                        return caches.delete(cacheName);
-                    }
-                })
-            );
-        }).catch(error => console.error('[Service Worker] Erro ao ativar:', error))
+            .catch(err => {
+                console.error('[Service Worker] Erro ao abrir cache:', err);
+            })
     );
 });
 
 self.addEventListener('fetch', event => {
-    console.log('[Service Worker] Fetch interceptado:', event.request.url);
+    console.log('[Service Worker] Fetch:', event.request.url);
     event.respondWith(
         caches.match(event.request)
             .then(response => {
@@ -48,7 +32,7 @@ self.addEventListener('fetch', event => {
                     console.log('[Service Worker] Servindo do cache:', event.request.url);
                     return response;
                 }
-                console.log('[Service Worker] Buscando na rede:', event.request.url);
+                console.log('[Service Worker] Buscando da rede:', event.request.url);
                 return fetch(event.request)
                     .then(networkResponse => {
                         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
@@ -57,17 +41,32 @@ self.addEventListener('fetch', event => {
                         const responseToCache = networkResponse.clone();
                         caches.open(CACHE_NAME)
                             .then(cache => {
+                                console.log('[Service Worker] Armazenando no cache:', event.request.url);
                                 cache.put(event.request, responseToCache);
-                                console.log('[Service Worker] Armazenado na cache:', event.request.url);
-                            })
-                            .catch(error => console.error('[Service Worker] Erro ao armazenar na cache:', error));
+                            });
                         return networkResponse;
                     })
-                    .catch(error => {
-                        console.error('[Service Worker] Erro na busca:', error);
-                        throw error;
+                    .catch(err => {
+                        console.error('[Service Worker] Erro na busca:', err);
+                        throw err;
                     });
             })
-            .catch(error => console.error('[Service Worker] Erro ao buscar do cache:', error))
+    );
+});
+
+self.addEventListener('activate', event => {
+    console.log('[Service Worker] Ativando...');
+    const cacheWhitelist = [CACHE_NAME];
+    event.waitUntil(
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.map(cacheName => {
+                    if (!cacheWhitelist.includes(cacheName)) {
+                        console.log('[Service Worker] Deletando cache antigo:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        })
     );
 });

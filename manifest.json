@@ -1,10 +1,11 @@
 {
-    "name": "OCR Web App",
-    "short_name": "OCR App",
+    "name": "OCR Leitor",
+    "short_name": "OCR Leitor",
+    "description": "Aplicação para OCR com suporte a upload, câmera, webcam e colagem de imagens.",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#f4f7f6",
-    "theme_color": "#2c3e50",
+    "background_color": "#ffffff",
+    "theme_color": "#3498db",
     "icons": [
         {
             "src": "/icon-192.png",
