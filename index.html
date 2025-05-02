@@ -46,6 +46,7 @@
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js" defer></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js" defer></script>
     <link rel="manifest" href="/manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6; color: #333; line-height: 1.6; }
@@ -109,19 +110,37 @@
         #searchResults ul { list-style: none; padding: 0; margin: 0; }
         #searchResults li { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #dfe6e9; }
         #searchResults li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        #authSection { margin-bottom: 20px; padding: 15px; background-color: #eaf0f1; border-radius: 6px; text-align: center; }
+        #authSection input { padding: 8px; margin: 5px; width: 200px; border: 1px solid #bdc3c7; border-radius: 4px; }
+        #authSection button { background-color: #e67e22; color: white; }
+        #authSection button:hover:not(:disabled) { background-color: #d35400; }
+        #authStatus { margin-top: 10px; font-weight: bold; color: #34495e; }
+        #googleSignInButton { background-color: #4285f4; }
+        #googleSignInButton:hover:not(:disabled) { background-color: #3578e5; }
         @media (max-width: 600px) {
             .container { padding: 15px; }
             button { font-size: 0.9em; padding: 8px 12px; }
             #pasteArea { font-size: 0.9em; padding: 15px; }
             #webcamVideo { max-width: 100%; }
             #searchInput { width: 60%; }
+            #authSection input { width: 90%; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>OCR: Paste, Câmera, Webcam ou Upload</h1>
-        <div class="controls-section">
+        <div id="authSection">
+            <div id="loginForm" style="display: none;">
+                <input type="email" id="emailInput" placeholder="E-mail">
+                <input type="password" id="passwordInput" placeholder="Senha">
+                <button id="loginButton">Entrar</button>
+                <button id="googleSignInButton">Entrar com Google</button>
+                <button id="registerButton">Registrar</button>
+            </div>
+            <div id="authStatus">Faça login para acessar a aplicação.</div>
+        </div>
+        <div class="controls-section" id="controlsSection" style="display: none;">
             <p>1. Forneça a imagem:</p>
             <label for="uploadInput"><button type="button" onclick="document.getElementById('uploadInput').click();">📁 Escolher Arquivo</button></label>
             <input type="file" id="uploadInput" accept="image/png, image/jpeg">
@@ -131,7 +150,7 @@
             <button onclick="clearAll()" style="background-color: #e74c3c; color: white;">🗑️ Limpar Tudo</button>
             <p id="webcamError" style="color: red; font-size: 0.9em; margin-top: 5px;"></p>
         </div>
-        <div id="pasteArea" title="Copie uma imagem e clique aqui ou pressione Ctrl+V / Cmd+V">
+        <div id="pasteArea" style="display: none;" title="Copie uma imagem e clique aqui ou pressione Ctrl+V / Cmd+V">
             📋 Ou cole uma imagem da área de transferência aqui (Ctrl+V / Cmd+V)
         </div>
         <div id="webcamSection">
@@ -142,10 +161,10 @@
         </div>
         <div id="statusArea">
             <div id="spinner" class="spinner"></div>
-            <span id="statusText">Pronto para processar.</span>
+            <span id="statusText">Faça login para começar.</span>
         </div>
         <progress id="progressBar" value="0" max="1"></progress>
-        <div class="result-section">
+        <div class="result-section" id="resultSection" style="display: none;">
             <h2>Resultados do OCR:</h2>
             <h3>Texto Bruto Extraído (Erros ortográficos podem ser destacados abaixo):</h3>
             <pre id="rawOutput">(Nenhum resultado ainda)</pre>
@@ -179,61 +198,54 @@
     <script>
         // Configuração do Firebase
         const firebaseConfig = {
-            apiKey: "SUA_API_KEY_AQUI", // Substitua pelo valor do Firebase Console
-            authDomain: "SEU_PROJETO.firebaseapp.com", // Substitua pelo valor do Firebase Console
-            projectId: "SEU_PROJETO", // Substitua pelo valor do Firebase Console
-            storageBucket: "SEU_PROJETO.appspot.com", // Substitua pelo valor do Firebase Console
-            messagingSenderId: "SEU_SENDER_ID", // Substitua pelo valor do Firebase Console
-            appId: "SEU_APP_ID" // Substitua pelo valor do Firebase Console
+            apiKey: "AIzaSyDfZp0QD9c8PHDhuO9BjBmfaQ8X5R35YVE",
+            authDomain: "seu-projeto.firebaseapp.com", // PREENCHA: Firebase Console > Project Settings > Web App
+            projectId: "seu-projeto", // PREENCHA: Firebase Console > Project Settings
+            storageBucket: "seu-projeto.appspot.com", // PREENCHA: Firebase Console
+            messagingSenderId: "123456789", // PREENCHA: Firebase Console
+            appId: "1:123456789:web:abcdef123456" // PREENCHA: Firebase Console
         };
 
-        let db;
-        // Capturar erros gerais de script
+        let db, auth;
+        // Capturar erros globais
         window.addEventListener('error', (event) => {
             console.error('Erro de script detectado:', event.message, event.filename, event.lineno, event.colno, event.error);
-            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console para detalhes.`;
+            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console.`;
         });
 
         // Inicializar Firebase
         try {
             if (!window.firebase) {
-                throw new Error('Firebase SDK não carregado. Verifique a conexão ou o script em https://www.gstatic.com/firebasejs/.');
+                throw new Error('Firebase SDK não carregado. Verifique a conexão ou scripts em https://www.gstatic.com/firebasejs/.');
             }
             firebase.initializeApp(firebaseConfig);
             db = firebase.firestore();
+            auth = firebase.auth();
             console.log('Firebase inicializado com sucesso! Project ID:', firebaseConfig.projectId);
-            document.getElementById('statusText').textContent = 'Conectado ao banco de dados. Pronto para processar.';
         } catch (error) {
             console.error('Erro ao inicializar Firebase:', error.message, error);
-            const errorMessage = `Erro ao conectar com o banco de dados: ${error.message}. Verifique a configuração no Firebase Console.`;
-            document.getElementById('statusText').textContent = errorMessage;
+            document.getElementById('statusText').textContent = `Erro ao conectar com o banco de dados: ${error.message}. Verifique o Firebase Console.`;
             document.getElementById('saveButton').disabled = true;
             document.getElementById('searchButton').disabled = true;
             document.getElementById('downloadJsonButton').disabled = true;
         }
 
-        // Registrar Service Worker
-        window.addEventListener('load', () => {
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js', { scope: '/' })
-                    .then(reg => {
-                        console.log('Service Worker registrado com sucesso:', reg);
-                        document.getElementById('statusText').textContent = 'Service Worker registrado. Pronto para processar.';
-                    })
-                    .catch(err => {
-                        console.error('Erro ao registrar Service Worker:', err.message, err);
-                        document.getElementById('statusText').textContent = `Erro ao registrar Service Worker: ${err.message}. Verifique se /sw.js existe e está acessível.`;
-                    });
-            } else {
-                console.warn('Service Worker não suportado neste navegador.');
-                document.getElementById('statusText').textContent = 'Service Worker não suportado pelo navegador.';
-            }
-        });
+        // Elementos de autenticação
+        const loginForm = document.getElementById('loginForm');
+        const authStatus = document.getElementById('authStatus');
+        const emailInput = document.getElementById('emailInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginButton = document.getElementById('loginButton');
+        const googleSignInButton = document.getElementById('googleSignInButton');
+        const registerButton = document.getElementById('registerButton');
+        const controlsSection = document.getElementById('controlsSection');
+        const pasteArea = document.getElementById('pasteArea');
+        const resultSection = document.getElementById('resultSection');
 
+        // Elementos principais
         const uploadInput = document.getElementById('uploadInput');
         const mobileCameraInput = document.getElementById('mobileCameraInput');
         const activateWebcamButton = document.getElementById('activateWebcamButton');
-        const pasteArea = document.getElementById('pasteArea');
         const webcamVideo = document.getElementById('webcamVideo');
         const webcamCanvas = document.getElementById('webcamCanvas');
         const takePhotoButton = document.getElementById('takePhotoButton');
@@ -258,6 +270,97 @@
         };
         let currentStream = null;
         let rawOcrText = '';
+
+        // Gerenciar estado de autenticação
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                loginForm.style.display = 'none';
+                authStatus.innerHTML = `Bem-vindo, ${user.displayName || user.email}! <button id="logoutButton">Sair</button>`;
+                controlsSection.style.display = 'block';
+                pasteArea.style.display = 'block';
+                resultSection.style.display = 'block';
+                setStatus('Pronto para processar.');
+                updateSavedEntries();
+                document.getElementById('logoutButton').addEventListener('click', () => {
+                    auth.signOut().then(() => {
+                        setStatus('Desconectado. Faça login novamente.');
+                    }).catch(error => {
+                        console.error('Erro ao fazer logout:', error);
+                        setStatus(`Erro ao fazer logout: ${error.message}`);
+                    });
+                });
+            } else {
+                loginForm.style.display = 'block';
+                authStatus.textContent = 'Faça login para acessar a aplicação.';
+                controlsSection.style.display = 'none';
+                pasteArea.style.display = 'none';
+                resultSection.style.display = 'none';
+                setStatus('Faça login para começar.');
+                savedEntriesList.innerHTML = '';
+                clearAll();
+            }
+        });
+
+        // Funções de autenticação
+        loginButton.addEventListener('click', () => {
+            const email = emailInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!email || !password) {
+                setStatus('Preencha e-mail e senha.');
+                return;
+            }
+            showSpinner(true);
+            setStatus('Fazendo login...');
+            auth.signInWithEmailAndPassword(email, password)
+                .then(() => {
+                    setStatus('Login realizado com sucesso!');
+                    showSpinner(false);
+                })
+                .catch(error => {
+                    console.error('Erro ao fazer login:', error);
+                    setStatus(`Erro ao fazer login: ${error.message}`);
+                    showSpinner(false);
+                });
+        });
+
+        googleSignInButton.addEventListener('click', () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            showSpinner(true);
+            setStatus('Fazendo login com Google...');
+            auth.signInWithPopup(provider)
+                .then(() => {
+                    setStatus('Login com Google realizado com sucesso!');
+                    showSpinner(false);
+                })
+                .catch(error => {
+                    console.error('Erro ao fazer login com Google:', error);
+                    setStatus(`Erro ao fazer login com Google: ${error.message}`);
+                    showSpinner(false);
+                });
+        });
+
+        registerButton.addEventListener('click', () => {
+            const email = emailInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!email || !password) {
+                setStatus('Preencha e-mail e senha para registrar.');
+                return;
+            }
+            showSpinner(true);
+            setStatus('Registrando usuário...');
+            auth.createUserWithEmailAndPassword(email, password)
+                .then(() => {
+                    setStatus('Registro realizado com sucesso! Faça login.');
+                    showSpinner(false);
+                    emailInput.value = '';
+                    passwordInput.value = '';
+                })
+                .catch(error => {
+                    console.error('Erro ao registrar:', error);
+                    setStatus(`Erro ao registrar: ${error.message}`);
+                    showSpinner(false);
+                });
+        });
 
         function showSpinner(show = true) { 
             spinner.style.display = show ? 'inline-block' : 'none'; 
@@ -436,7 +539,7 @@
                     rawOcrText = text || '';
                     rawOutputPre.textContent = rawOcrText || '(Nenhum texto encontrado)';
                     spellCheckButton.disabled = !rawOcrText;
-                    saveButton.disabled = !db || !rawOcrText;
+                    saveButton.disabled = !db || !rawOcrText || !auth.currentUser;
                     const extractedData = extrairCamposExperimentalJS(rawOcrText);
                     for (const key in extractedData) {
                         if (extractedData[key]) {
@@ -459,8 +562,8 @@
             });
         }
         async function saveEntry() {
-            if (!db) {
-                setStatus('Banco de dados não inicializado.');
+            if (!db || !auth.currentUser) {
+                setStatus('Faça login para salvar dados.');
                 return;
             }
             const entry = {
@@ -471,7 +574,8 @@
                     cpf: extractedSpans.cpf.textContent !== 'Não encontrado' ? extractedSpans.cpf.textContent : null,
                     data_nascimento: extractedSpans.data_nascimento.textContent !== 'Não encontrado' ? extractedSpans.data_nascimento.textContent : null,
                     telefone: extractedSpans.telefone.textContent !== 'Não encontrado' ? extractedSpans.telefone.textContent : null
-                }
+                },
+                userId: auth.currentUser.uid
             };
             try {
                 showSpinner(true);
@@ -487,12 +591,13 @@
             }
         }
         function updateSavedEntries() {
-            if (!db) {
-                savedEntriesList.innerHTML = '<li>Banco de dados não inicializado.</li>';
+            if (!db || !auth.currentUser) {
+                savedEntriesList.innerHTML = '<li>Faça login para ver entradas salvas.</li>';
                 return;
             }
             savedEntriesList.innerHTML = '';
             db.collection('entries')
+                .where('userId', '==', auth.currentUser.uid)
                 .orderBy('timestamp', 'desc')
                 .onSnapshot(snapshot => {
                     savedEntriesList.innerHTML = '';
@@ -519,32 +624,36 @@
                 });
         }
         function downloadJson() {
-            if (!db) {
-                setStatus('Banco de dados não inicializado.');
+            if (!db || !auth.currentUser) {
+                setStatus('Faça login para baixar dados.');
                 return;
             }
-            db.collection('entries').get().then(snapshot => {
-                const entries = [];
-                snapshot.forEach(doc => {
-                    entries.push({ id: doc.id, ...doc.data() });
+            db.collection('entries')
+                .where('userId', '==', auth.currentUser.uid)
+                .get()
+                .then(snapshot => {
+                    const entries = [];
+                    snapshot.forEach(doc => {
+                        entries.push({ id: doc.id, ...doc.data() });
+                    });
+                    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error('Erro ao baixar JSON:', error);
+                    setStatus(`Erro ao baixar JSON: ${error.message}`);
                 });
-                const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }).catch(error => {
-                console.error('Erro ao baixar JSON:', error);
-                setStatus(`Erro ao baixar JSON: ${error.message}`);
-            });
         }
         async function searchEntries() {
-            if (!db) {
-                searchResults.innerHTML = 'Banco de dados não inicializado.';
+            if (!db || !auth.currentUser) {
+                searchResults.innerHTML = 'Faça login para buscar cadastros.';
                 return;
             }
             const query = searchInput.value.trim().toLowerCase();
@@ -555,7 +664,9 @@
             try {
                 showSpinner(true);
                 setStatus('Buscando cadastros...');
-                const snapshot = await db.collection('entries').get();
+                const snapshot = await db.collection('entries')
+                    .where('userId', '==', auth.currentUser.uid)
+                    .get();
                 const results = [];
                 snapshot.forEach(doc => {
                     const entry = doc.data();
@@ -620,7 +731,7 @@
                 console.error("Erro ao acessar webcam:", err);
                 setStatus('Erro ao acessar webcam.');
                 showSpinner(false);
-                webcamErrorDiv.textContent = `Erro: ${err.name} - ${err.message}. Verifique permissões e se está usando HTTPS.`;
+                webcamErrorDiv.textContent = `Erro: ${err.name} - ${err.message}. Verifique permissões e HTTPS.`;
                 currentStream = null;
             }
         });
@@ -693,8 +804,25 @@
         });
         window.addEventListener('load', () => {
             clearAll();
-            if (db) {
-                updateSavedEntries();
+            // Registrar Service Worker
+            if ('serviceWorker' in navigator) {
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                    console.error('Service Worker requer HTTPS. Use https://localhost:8080 ou deploy em HTTPS.');
+                    setStatus('Erro: Service Worker requer HTTPS.');
+                    return;
+                }
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(reg => {
+                        console.log('Service Worker registrado com sucesso:', reg);
+                        setStatus('Service Worker ativo. Faça login para começar.');
+                    })
+                    .catch(err => {
+                        console.error('Erro ao registrar Service Worker:', err.message, err);
+                        setStatus(`Erro ao registrar Service Worker: ${err.message}. Verifique se /sw.js está na raiz.`);
+                    });
+            } else {
+                console.warn('Service Worker não suportado neste navegador.');
+                setStatus('Service Worker não suportado no navegador.');
             }
         });
     </script>
