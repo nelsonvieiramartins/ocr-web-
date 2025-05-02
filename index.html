@@ -44,6 +44,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OCR com Paste, Câmera, Webcam e Upload</title>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js" defer></script>
     <link rel="manifest" href="/manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6; color: #333; line-height: 1.6; }
@@ -99,11 +101,20 @@
         #savedEntries li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
         #downloadJsonButton { background-color: #3498db; color: white; margin-top: 10px; }
         #downloadJsonButton:hover:not(:disabled) { background-color: #2980b9; }
+        #searchSection { margin-top: 30px; padding: 15px; background-color: #eaf0f1; border-radius: 6px; }
+        #searchInput { padding: 8px; width: 70%; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 0.95em; }
+        #searchButton { background-color: #2ecc71; color: white; }
+        #searchButton:hover:not(:disabled) { background-color: #27ae60; }
+        #searchResults { margin-top: 15px; padding: 10px; background-color: #f8f9f9; border: 1px solid #dfe6e9; border-radius: 4px; min-height: 30px; }
+        #searchResults ul { list-style: none; padding: 0; margin: 0; }
+        #searchResults li { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #dfe6e9; }
+        #searchResults li:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
         @media (max-width: 600px) {
             .container { padding: 15px; }
             button { font-size: 0.9em; padding: 8px 12px; }
             #pasteArea { font-size: 0.9em; padding: 15px; }
             #webcamVideo { max-width: 100%; }
+            #searchInput { width: 60%; }
         }
     </style>
 </head>
@@ -157,9 +168,68 @@
                 <ul id="savedEntriesList"></ul>
                 <button id="downloadJsonButton" disabled>📥 Baixar JSON</button>
             </div>
+            <div id="searchSection">
+                <h3>Consultar Cadastros</h3>
+                <input type="text" id="searchInput" placeholder="Digite Nome ou CPF para buscar">
+                <button id="searchButton">🔍 Buscar</button>
+                <div id="searchResults">(Nenhum resultado de busca)</div>
+            </div>
         </div>
     </div>
     <script>
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "SUA_API_KEY_AQUI", // Substitua pelo valor do Firebase Console
+            authDomain: "SEU_PROJETO.firebaseapp.com", // Substitua pelo valor do Firebase Console
+            projectId: "SEU_PROJETO", // Substitua pelo valor do Firebase Console
+            storageBucket: "SEU_PROJETO.appspot.com", // Substitua pelo valor do Firebase Console
+            messagingSenderId: "SEU_SENDER_ID", // Substitua pelo valor do Firebase Console
+            appId: "SEU_APP_ID" // Substitua pelo valor do Firebase Console
+        };
+
+        let db;
+        // Capturar erros gerais de script
+        window.addEventListener('error', (event) => {
+            console.error('Erro de script detectado:', event.message, event.filename, event.lineno, event.colno, event.error);
+            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console para detalhes.`;
+        });
+
+        // Inicializar Firebase
+        try {
+            if (!window.firebase) {
+                throw new Error('Firebase SDK não carregado. Verifique a conexão ou o script em https://www.gstatic.com/firebasejs/.');
+            }
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            console.log('Firebase inicializado com sucesso! Project ID:', firebaseConfig.projectId);
+            document.getElementById('statusText').textContent = 'Conectado ao banco de dados. Pronto para processar.';
+        } catch (error) {
+            console.error('Erro ao inicializar Firebase:', error.message, error);
+            const errorMessage = `Erro ao conectar com o banco de dados: ${error.message}. Verifique a configuração no Firebase Console.`;
+            document.getElementById('statusText').textContent = errorMessage;
+            document.getElementById('saveButton').disabled = true;
+            document.getElementById('searchButton').disabled = true;
+            document.getElementById('downloadJsonButton').disabled = true;
+        }
+
+        // Registrar Service Worker
+        window.addEventListener('load', () => {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(reg => {
+                        console.log('Service Worker registrado com sucesso:', reg);
+                        document.getElementById('statusText').textContent = 'Service Worker registrado. Pronto para processar.';
+                    })
+                    .catch(err => {
+                        console.error('Erro ao registrar Service Worker:', err.message, err);
+                        document.getElementById('statusText').textContent = `Erro ao registrar Service Worker: ${err.message}. Verifique se /sw.js existe e está acessível.`;
+                    });
+            } else {
+                console.warn('Service Worker não suportado neste navegador.');
+                document.getElementById('statusText').textContent = 'Service Worker não suportado pelo navegador.';
+            }
+        });
+
         const uploadInput = document.getElementById('uploadInput');
         const mobileCameraInput = document.getElementById('mobileCameraInput');
         const activateWebcamButton = document.getElementById('activateWebcamButton');
@@ -169,7 +239,6 @@
         const takePhotoButton = document.getElementById('takePhotoButton');
         const stopWebcamButton = document.getElementById('stopWebcamButton');
         const webcamErrorDiv = document.getElementById('webcamError');
-        const statusArea = document.getElementById('statusArea');
         const statusText = document.getElementById('statusText');
         const spinner = document.getElementById('spinner');
         const progressBar = document.getElementById('progressBar');
@@ -178,6 +247,9 @@
         const saveButton = document.getElementById('saveButton');
         const savedEntriesList = document.getElementById('savedEntriesList');
         const downloadJsonButton = document.getElementById('downloadJsonButton');
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const searchResults = document.getElementById('searchResults');
         const extractedSpans = { 
             nome: document.getElementById('ext_nome'), 
             cpf: document.getElementById('ext_cpf'), 
@@ -205,9 +277,9 @@
             rawOutputPre.innerHTML = '(Nenhum resultado ainda)'; 
             setStatus('Pronto para processar.'); 
             showSpinner(false); 
-            spellCheckOutput.innerHTML = '(Aguardando verificação...)'; 
+            document.getElementById('spellCheckOutput').innerHTML = '(Aguardando verificação...)'; 
             spellCheckButton.disabled = true; 
-            saveButton.disabled = true; 
+            saveButton.disabled = !db || !rawOcrText; 
             for (const key in extractedSpans) { 
                 extractedSpans[key].textContent = 'Não encontrado'; 
                 extractedSpans[key].className = 'not-found'; 
@@ -270,17 +342,17 @@
         }
         async function checkSpellingWithLanguageTool(textToCheck) { 
             if (!textToCheck || textToCheck.trim() === '(Nenhum resultado ainda)' || textToCheck.trim() === '') { 
-                spellCheckOutput.innerHTML = 'Nenhum texto para verificar.'; 
+                document.getElementById('spellCheckOutput').innerHTML = 'Nenhum texto para verificar.'; 
                 return; 
             } 
             if (!navigator.onLine) { 
-                spellCheckOutput.innerHTML = '<span style="color: red;">Conexão com a internet necessária para verificação ortográfica.</span>'; 
+                document.getElementById('spellCheckOutput').innerHTML = '<span style="color: red;">Conexão com a internet necessária para verificação ortográfica.</span>'; 
                 return; 
             } 
             spellCheckButton.disabled = true; 
             showSpinner(true); 
             setStatus('Verificando ortografia...', true, null); 
-            spellCheckOutput.innerHTML = '<i>Contactando API LanguageTool...</i>'; 
+            document.getElementById('spellCheckOutput').innerHTML = '<i>Contactando API LanguageTool...</i>'; 
             const apiUrl = 'https://languagetool.org/api/v2/check'; 
             const data = new URLSearchParams(); 
             data.append('text', textToCheck); 
@@ -310,16 +382,16 @@
                         suggestionsHtml += `</li>`; 
                     }); 
                     suggestionsHtml += '</ul>'; 
-                    spellCheckOutput.innerHTML = suggestionsHtml; 
+                    document.getElementById('spellCheckOutput').innerHTML = suggestionsHtml; 
                     setStatus('Verificação concluída. Erros destacados no texto acima.'); 
                 } else { 
-                    spellCheckOutput.innerHTML = '<span style="color: green;">Nenhum erro ortográfico encontrado pela API.</span>'; 
+                    document.getElementById('spellCheckOutput').innerHTML = '<span style="color: green;">Nenhum erro ortográfico encontrado pela API.</span>'; 
                     setStatus('Verificação concluída.'); 
                     rawOutputPre.textContent = rawOcrText; 
                 } 
             } catch (error) { 
                 console.error('Erro ao verificar ortografia:', error); 
-                spellCheckOutput.innerHTML = `<span style="color: red;">Erro ao contactar o serviço de verificação: ${error.message}</span>`; 
+                document.getElementById('spellCheckOutput').innerHTML = `<span style="color: red;">Erro ao contactar o serviço de verificação: ${error.message}</span>`; 
                 setStatus('Erro na verificação ortográfica.'); 
                 rawOutputPre.textContent = rawOcrText; 
             } finally { 
@@ -364,7 +436,7 @@
                     rawOcrText = text || '';
                     rawOutputPre.textContent = rawOcrText || '(Nenhum texto encontrado)';
                     spellCheckButton.disabled = !rawOcrText;
-                    saveButton.disabled = !rawOcrText;
+                    saveButton.disabled = !db || !rawOcrText;
                     const extractedData = extrairCamposExperimentalJS(rawOcrText);
                     for (const key in extractedData) {
                         if (extractedData[key]) {
@@ -386,7 +458,11 @@
                 });
             });
         }
-        function saveEntry() {
+        async function saveEntry() {
+            if (!db) {
+                setStatus('Banco de dados não inicializado.');
+                return;
+            }
             const entry = {
                 timestamp: new Date().toISOString(),
                 rawText: rawOcrText,
@@ -397,41 +473,124 @@
                     telefone: extractedSpans.telefone.textContent !== 'Não encontrado' ? extractedSpans.telefone.textContent : null
                 }
             };
-            let savedEntries = JSON.parse(localStorage.getItem('ocrEntries') || '[]');
-            savedEntries.push(entry);
-            localStorage.setItem('ocrEntries', JSON.stringify(savedEntries));
-            updateSavedEntries();
-            setStatus('Dados salvos! Pronto para a próxima imagem.');
-            clearAll();
+            try {
+                showSpinner(true);
+                setStatus('Salvando no banco de dados...');
+                await db.collection('entries').add(entry);
+                setStatus('Dados salvos no banco! Pronto para a próxima imagem.');
+                clearAll();
+            } catch (error) {
+                console.error('Erro ao salvar no Firestore:', error);
+                setStatus(`Erro ao salvar: ${error.message}`);
+            } finally {
+                showSpinner(false);
+            }
         }
         function updateSavedEntries() {
-            const savedEntries = JSON.parse(localStorage.getItem('ocrEntries') || '[]');
+            if (!db) {
+                savedEntriesList.innerHTML = '<li>Banco de dados não inicializado.</li>';
+                return;
+            }
             savedEntriesList.innerHTML = '';
-            savedEntries.forEach((entry, index) => {
-                const li = document.createElement('li');
-                li.innerHTML = `
-                    <b>Entrada ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
-                    Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
-                    CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
-                    Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
-                    Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
-                    Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
-                `;
-                savedEntriesList.appendChild(li);
-            });
-            downloadJsonButton.disabled = savedEntries.length === 0;
+            db.collection('entries')
+                .orderBy('timestamp', 'desc')
+                .onSnapshot(snapshot => {
+                    savedEntriesList.innerHTML = '';
+                    const entries = [];
+                    snapshot.forEach(doc => {
+                        entries.push({ id: doc.id, ...doc.data() });
+                    });
+                    entries.forEach((entry, index) => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `
+                            <b>Entrada ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
+                            Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
+                            CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
+                            Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
+                            Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
+                            Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
+                        `;
+                        savedEntriesList.appendChild(li);
+                    });
+                    downloadJsonButton.disabled = entries.length === 0;
+                }, error => {
+                    console.error('Erro ao buscar entradas:', error);
+                    savedEntriesList.innerHTML = `<li>Erro ao carregar entradas: ${error.message}</li>`;
+                });
         }
         function downloadJson() {
-            const savedEntries = JSON.parse(localStorage.getItem('ocrEntries') || '[]');
-            const blob = new Blob([JSON.stringify(savedEntries, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            if (!db) {
+                setStatus('Banco de dados não inicializado.');
+                return;
+            }
+            db.collection('entries').get().then(snapshot => {
+                const entries = [];
+                snapshot.forEach(doc => {
+                    entries.push({ id: doc.id, ...doc.data() });
+                });
+                const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }).catch(error => {
+                console.error('Erro ao baixar JSON:', error);
+                setStatus(`Erro ao baixar JSON: ${error.message}`);
+            });
+        }
+        async function searchEntries() {
+            if (!db) {
+                searchResults.innerHTML = 'Banco de dados não inicializado.';
+                return;
+            }
+            const query = searchInput.value.trim().toLowerCase();
+            if (!query) {
+                searchResults.innerHTML = 'Digite um Nome ou CPF para buscar.';
+                return;
+            }
+            try {
+                showSpinner(true);
+                setStatus('Buscando cadastros...');
+                const snapshot = await db.collection('entries').get();
+                const results = [];
+                snapshot.forEach(doc => {
+                    const entry = doc.data();
+                    if ((entry.extracted.nome && entry.extracted.nome.toLowerCase().includes(query)) ||
+                        (entry.extracted.cpf && entry.extracted.cpf.includes(query))) {
+                        results.push({ id: doc.id, ...entry });
+                    }
+                });
+                searchResults.innerHTML = '';
+                if (results.length === 0) {
+                    searchResults.innerHTML = 'Nenhum cadastro encontrado.';
+                    return;
+                }
+                const ul = document.createElement('ul');
+                results.forEach((entry, index) => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <b>Resultado ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
+                        Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
+                        CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
+                        Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
+                        Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
+                        Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
+                    `;
+                    ul.appendChild(li);
+                });
+                searchResults.appendChild(ul);
+                setStatus('Busca concluída.');
+            } catch (error) {
+                console.error('Erro ao buscar cadastros:', error);
+                searchResults.innerHTML = `Erro ao realizar a busca: ${error.message}`;
+                setStatus('Erro na busca.');
+            } finally {
+                showSpinner(false);
+            }
         }
         uploadInput.addEventListener('change', (event) => { 
             if (event.target.files[0]) processImageWithTesseract(event.target.files[0]); 
@@ -502,6 +661,10 @@
         });
         saveButton.addEventListener('click', saveEntry);
         downloadJsonButton.addEventListener('click', downloadJson);
+        searchButton.addEventListener('click', searchEntries);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchEntries();
+        });
         document.addEventListener('paste', (event) => {
             console.log('Paste event detected!');
             const items = (event.clipboardData || event.originalEvent.clipboardData)?.items;
@@ -530,15 +693,8 @@
         });
         window.addEventListener('load', () => {
             clearAll();
-            updateSavedEntries();
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js', { scope: '/' })
-                    .then(reg => {
-                        console.log('Service Worker registrado com sucesso:', reg);
-                    })
-                    .catch(err => {
-                        console.error('Erro ao registrar Service Worker:', err.message, err);
-                    });
+            if (db) {
+                updateSavedEntries();
             }
         });
     </script>
