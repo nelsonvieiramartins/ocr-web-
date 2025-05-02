@@ -44,9 +44,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OCR com Paste, Câmera, Webcam e Upload</title>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js' defer></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js" defer></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js" defer></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js" defer></script>
     <link rel="manifest" href="/manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6; color: #333; line-height: 1.6; }
@@ -195,32 +192,28 @@
             </div>
         </div>
     </div>
-    <script>
+    <script type="module">
+        // Importações do Firebase (SDK Modular v11.6.1)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
         // Configuração do Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyDfZp0QD9c8PHDhuO9BjBmfaQ8X5R35YVE",
-            authDomain: "seu-projeto.firebaseapp.com", // PREENCHA: Firebase Console > Project Settings > Web App
-            projectId: "seu-projeto", // PREENCHA: Firebase Console > Project Settings
-            storageBucket: "seu-projeto.appspot.com", // PREENCHA: Firebase Console
-            messagingSenderId: "123456789", // PREENCHA: Firebase Console
-            appId: "1:123456789:web:abcdef123456" // PREENCHA: Firebase Console
+            apiKey: "AIzaSyCNmrulY8Q88n_mO4YZmJIU7FJgwqrow2o",
+            authDomain: "ocrleitor.firebaseapp.com",
+            projectId: "ocrleitor",
+            storageBucket: "ocrleitor.firebasestorage.app",
+            messagingSenderId: "1004691426866",
+            appId: "1:1004691426866:web:a0ce7ca5f83e590dcef62b"
         };
 
-        let db, auth;
-        // Capturar erros globais
-        window.addEventListener('error', (event) => {
-            console.error('Erro de script detectado:', event.message, event.filename, event.lineno, event.colno, event.error);
-            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console.`;
-        });
-
         // Inicializar Firebase
+        let db, auth;
         try {
-            if (!window.firebase) {
-                throw new Error('Firebase SDK não carregado. Verifique a conexão ou scripts em https://www.gstatic.com/firebasejs/.');
-            }
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-            auth = firebase.auth();
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
             console.log('Firebase inicializado com sucesso! Project ID:', firebaseConfig.projectId);
         } catch (error) {
             console.error('Erro ao inicializar Firebase:', error.message, error);
@@ -229,6 +222,12 @@
             document.getElementById('searchButton').disabled = true;
             document.getElementById('downloadJsonButton').disabled = true;
         }
+
+        // Capturar erros globais
+        window.addEventListener('error', (event) => {
+            console.error('Erro de script detectado:', event.message, event.filename, event.lineno, event.colno, event.error);
+            document.getElementById('statusText').textContent = `Erro ao carregar script: ${event.message}. Verifique o console.`;
+        });
 
         // Elementos de autenticação
         const loginForm = document.getElementById('loginForm');
@@ -272,7 +271,7 @@
         let rawOcrText = '';
 
         // Gerenciar estado de autenticação
-        auth.onAuthStateChanged(user => {
+        onAuthStateChanged(auth, user => {
             if (user) {
                 loginForm.style.display = 'none';
                 authStatus.innerHTML = `Bem-vindo, ${user.displayName || user.email}! <button id="logoutButton">Sair</button>`;
@@ -282,7 +281,7 @@
                 setStatus('Pronto para processar.');
                 updateSavedEntries();
                 document.getElementById('logoutButton').addEventListener('click', () => {
-                    auth.signOut().then(() => {
+                    signOut(auth).then(() => {
                         setStatus('Desconectado. Faça login novamente.');
                     }).catch(error => {
                         console.error('Erro ao fazer logout:', error);
@@ -302,7 +301,7 @@
         });
 
         // Funções de autenticação
-        loginButton.addEventListener('click', () => {
+        loginButton.addEventListener('click', async () => {
             const email = emailInput.value.trim();
             const password = passwordInput.value.trim();
             if (!email || !password) {
@@ -311,35 +310,33 @@
             }
             showSpinner(true);
             setStatus('Fazendo login...');
-            auth.signInWithEmailAndPassword(email, password)
-                .then(() => {
-                    setStatus('Login realizado com sucesso!');
-                    showSpinner(false);
-                })
-                .catch(error => {
-                    console.error('Erro ao fazer login:', error);
-                    setStatus(`Erro ao fazer login: ${error.message}`);
-                    showSpinner(false);
-                });
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                setStatus('Login realizado com sucesso!');
+                showSpinner(false);
+            } catch (error) {
+                console.error('Erro ao fazer login:', error);
+                setStatus(`Erro ao fazer login: ${error.message}`);
+                showSpinner(false);
+            }
         });
 
-        googleSignInButton.addEventListener('click', () => {
-            const provider = new firebase.auth.GoogleAuthProvider();
+        googleSignInButton.addEventListener('click', async () => {
+            const provider = new GoogleAuthProvider();
             showSpinner(true);
             setStatus('Fazendo login com Google...');
-            auth.signInWithPopup(provider)
-                .then(() => {
-                    setStatus('Login com Google realizado com sucesso!');
-                    showSpinner(false);
-                })
-                .catch(error => {
-                    console.error('Erro ao fazer login com Google:', error);
-                    setStatus(`Erro ao fazer login com Google: ${error.message}`);
-                    showSpinner(false);
-                });
+            try {
+                await signInWithPopup(auth, provider);
+                setStatus('Login com Google realizado com sucesso!');
+                showSpinner(false);
+            } catch (error) {
+                console.error('Erro ao fazer login com Google:', error);
+                setStatus(`Erro ao fazer login com Google: ${error.message}`);
+                showSpinner(false);
+            }
         });
 
-        registerButton.addEventListener('click', () => {
+        registerButton.addEventListener('click', async () => {
             const email = emailInput.value.trim();
             const password = passwordInput.value.trim();
             if (!email || !password) {
@@ -348,18 +345,17 @@
             }
             showSpinner(true);
             setStatus('Registrando usuário...');
-            auth.createUserWithEmailAndPassword(email, password)
-                .then(() => {
-                    setStatus('Registro realizado com sucesso! Faça login.');
-                    showSpinner(false);
-                    emailInput.value = '';
-                    passwordInput.value = '';
-                })
-                .catch(error => {
-                    console.error('Erro ao registrar:', error);
-                    setStatus(`Erro ao registrar: ${error.message}`);
-                    showSpinner(false);
-                });
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                setStatus('Registro realizado com sucesso! Faça login.');
+                showSpinner(false);
+                emailInput.value = '';
+                passwordInput.value = '';
+            } catch (error) {
+                console.error('Erro ao registrar:', error);
+                setStatus(`Erro ao registrar: ${error.message}`);
+                showSpinner(false);
+            }
         });
 
         function showSpinner(show = true) { 
@@ -580,7 +576,7 @@
             try {
                 showSpinner(true);
                 setStatus('Salvando no banco de dados...');
-                await db.collection('entries').add(entry);
+                await addDoc(collection(db, 'entries'), entry);
                 setStatus('Dados salvos no banco! Pronto para a próxima imagem.');
                 clearAll();
             } catch (error) {
@@ -596,82 +592,77 @@
                 return;
             }
             savedEntriesList.innerHTML = '';
-            db.collection('entries')
-                .where('userId', '==', auth.currentUser.uid)
-                .orderBy('timestamp', 'desc')
-                .onSnapshot(snapshot => {
-                    savedEntriesList.innerHTML = '';
-                    const entries = [];
-                    snapshot.forEach(doc => {
-                        entries.push({ id: doc.id, ...doc.data() });
-                    });
-                    entries.forEach((entry, index) => {
-                        const li = document.createElement('li');
-                        li.innerHTML = `
-                            <b>Entrada ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
-                            Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
-                            CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
-                            Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
-                            Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
-                            Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
-                        `;
-                        savedEntriesList.appendChild(li);
-                    });
-                    downloadJsonButton.disabled = entries.length === 0;
-                }, error => {
-                    console.error('Erro ao buscar entradas:', error);
-                    savedEntriesList.innerHTML = `<li>Erro ao carregar entradas: ${error.message}</li>`;
+            const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid), orderBy('timestamp', 'desc'));
+            onSnapshot(q, (snapshot) => {
+                savedEntriesList.innerHTML = '';
+                const entries = [];
+                snapshot.forEach(doc => {
+                    entries.push({ id: doc.id, ...doc.data() });
                 });
+                entries.forEach((entry, index) => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <b>Entrada ${index + 1} (${new Date(entry.timestamp).toLocaleString()}):</b><br>
+                        Nome: ${entry.extracted.nome || 'Não encontrado'}<br>
+                        CPF: ${entry.extracted.cpf || 'Não encontrado'}<br>
+                        Data Nascimento: ${entry.extracted.data_nascimento || 'Não encontrado'}<br>
+                        Telefone: ${entry.extracted.telefone || 'Não encontrado'}<br>
+                        Texto Bruto: <pre style="display: inline;">${entry.rawText.substring(0, 50)}${entry.rawText.length > 50 ? '...' : ''}</pre>
+                    `;
+                    savedEntriesList.appendChild(li);
+                });
+                downloadJsonButton.disabled = entries.length === 0;
+            }, error => {
+                console.error('Erro ao buscar entradas:', error);
+                savedEntriesList.innerHTML = `<li>Erro ao carregar entradas: ${error.message}</li>`;
+            });
         }
-        function downloadJson() {
+        async function downloadJson() {
             if (!db || !auth.currentUser) {
                 setStatus('Faça login para baixar dados.');
                 return;
             }
-            db.collection('entries')
-                .where('userId', '==', auth.currentUser.uid)
-                .get()
-                .then(snapshot => {
-                    const entries = [];
-                    snapshot.forEach(doc => {
-                        entries.push({ id: doc.id, ...doc.data() });
-                    });
-                    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                })
-                .catch(error => {
-                    console.error('Erro ao baixar JSON:', error);
-                    setStatus(`Erro ao baixar JSON: ${error.message}`);
+            try {
+                const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid));
+                const snapshot = await getDocs(q);
+                const entries = [];
+                snapshot.forEach(doc => {
+                    entries.push({ id: doc.id, ...doc.data() });
                 });
+                const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ocr_entries_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Erro ao baixar JSON:', error);
+                setStatus(`Erro ao baixar JSON: ${error.message}`);
+            }
         }
         async function searchEntries() {
             if (!db || !auth.currentUser) {
                 searchResults.innerHTML = 'Faça login para buscar cadastros.';
                 return;
             }
-            const query = searchInput.value.trim().toLowerCase();
-            if (!query) {
+            const queryText = searchInput.value.trim().toLowerCase();
+            if (!queryText) {
                 searchResults.innerHTML = 'Digite um Nome ou CPF para buscar.';
                 return;
             }
             try {
                 showSpinner(true);
                 setStatus('Buscando cadastros...');
-                const snapshot = await db.collection('entries')
-                    .where('userId', '==', auth.currentUser.uid)
-                    .get();
+                const q = query(collection(db, 'entries'), where('userId', '==', auth.currentUser.uid));
+                const snapshot = await getDocs(q);
                 const results = [];
                 snapshot.forEach(doc => {
                     const entry = doc.data();
-                    if ((entry.extracted.nome && entry.extracted.nome.toLowerCase().includes(query)) ||
-                        (entry.extracted.cpf && entry.extracted.cpf.includes(query))) {
+                    if ((entry.extracted.nome && entry.extracted.nome.toLowerCase().includes(queryText)) ||
+                        (entry.extracted.cpf && entry.extracted.cpf.includes(queryText))) {
                         results.push({ id: doc.id, ...entry });
                     }
                 });
